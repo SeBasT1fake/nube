@@ -1,0 +1,6 @@
+station_id,station_name,city,latitude,longitude,altitude,installation_date,status
+1,Estacion Centro,Medellin,6.25,-75.56,1495,2020-01-15,active
+2,Estacion Norte,Bogota,4.61,-74.08,2640,2019-03-20,active
+3,Estacion Sur,Cali,3.42,-76.52,1018,2021-05-10,active
+4,Estacion Este,Barranquilla,10.96,-74.78,18,2018-11-05,maintenance
+5,Estacion Oeste,Cartagena,10.39,-75.51,2,2022-07-22,inactive
