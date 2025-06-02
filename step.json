@@ -1,0 +1,578 @@
+{
+  "Comment": "Pipeline automatizado completo para proyecto Telemática - Captura, ETL, Análisis y Despliegue",
+  "StartAt": "DataIngestionParallel",
+  "States": {
+    "DataIngestionParallel": {
+      "Type": "Parallel",
+      "Comment": "Captura de datos en paralelo desde múltiples fuentes",
+      "Branches": [
+        {
+          "StartAt": "IngestWeatherAPI",
+          "States": {
+            "IngestWeatherAPI": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "weather-api-ingestion",
+                "Payload": {
+                  "source": "open-meteo-api",
+                  "cities": [
+                    {
+                      "name": "Medellin",
+                      "latitude": 6.25,
+                      "longitude": -75.56
+                    },
+                    {
+                      "name": "Bogota",
+                      "latitude": 4.60,
+                      "longitude": -74.08
+                    },
+                    {
+                      "name": "Cali",
+                      "latitude": 3.43,
+                      "longitude": -76.52
+                    },
+                    {
+                      "name": "Barranquilla",
+                      "latitude": 10.96,
+                      "longitude": -74.80
+                    },
+                    {
+                      "name": "Cartagena",
+                      "latitude": 10.39,
+                      "longitude": -75.51
+                    }
+                  ],
+                  "date_range": {
+                    "start": "2023-06-01",
+                    "end": "2024-05-31"
+                  },
+                  "variables": [
+                    "temperature_2m_max",
+                    "temperature_2m_min",
+                    "precipitation_sum",
+                    "windspeed_10m_max",
+                    "pressure_msl"
+                  ],
+                  "output_bucket": "proyecto3-eafit-raw",
+                  "output_prefix": "weather_api_data/"
+                }
+              },
+              "End": true,
+              "Retry": [
+                {
+                  "ErrorEquals": ["States.TaskFailed"],
+                  "IntervalSeconds": 30,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2.0
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "Next": "HandleIngestionError",
+                  "ResultPath": "$.error"
+                }
+              ]
+            },
+            "HandleIngestionError": {
+              "Type": "Pass",
+              "Result": "API ingestion failed but continuing pipeline",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "IngestDatabaseData",
+          "States": {
+            "IngestDatabaseData": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "database-extraction",
+                "Payload": {
+                  "database_config": {
+                    "host": "weather-db-instance.cluster-xyz.us-east-1.rds.amazonaws.com",
+                    "database": "weather_analytics_db",
+                    "port": 3306
+                  },
+                  "tables": [
+                    {
+                      "name": "cities",
+                      "query": "SELECT city_id, city_name, latitude, longitude, population, region FROM cities"
+                    },
+                    {
+                      "name": "weather_stations",
+                      "query": "SELECT station_id, city_id, station_name, altitude, installation_date FROM weather_stations"
+                    },
+                    {
+                      "name": "weather_alerts",
+                      "query": "SELECT alert_id, city_id, alert_type, threshold_value, is_active FROM weather_alerts"
+                    },
+                    {
+                      "name": "historical_events",
+                      "query": "SELECT event_id, city_id, event_date, event_type, severity, description FROM historical_events WHERE event_date >= '2023-01-01'"
+                    }
+                  ],
+                  "output_bucket": "proyecto3-eafit-raw",
+                  "output_prefix": "database_data/"
+                }
+              },
+              "End": true,
+              "Retry": [
+                {
+                  "ErrorEquals": ["States.TaskFailed"],
+                  "IntervalSeconds": 30,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2.0
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "Next": "HandleDatabaseError",
+                  "ResultPath": "$.error"
+                }
+              ]
+            },
+            "HandleDatabaseError": {
+              "Type": "Pass",
+              "Result": "Database extraction failed but continuing pipeline",
+              "End": true
+            }
+          }
+        }
+      ],
+      "Next": "CreateEMRCluster",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "NotifyIngestionFailure",
+          "ResultPath": "$.ingestionError"
+        }
+      ]
+    },
+    "NotifyIngestionFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:123456789012:weather-pipeline-alerts",
+        "Message": "Data ingestion failed in weather analytics pipeline",
+        "Subject": "Weather Pipeline Alert - Ingestion Failure"
+      },
+      "End": true
+    },
+    "CreateEMRCluster": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::elasticmapreduce:createCluster.sync",
+      "Parameters": {
+        "Name": "Weather-Analytics-Cluster",
+        "ReleaseLabel": "emr-6.15.0",
+        "Applications": [
+          { "Name": "Spark" },
+          { "Name": "Hadoop" },
+          { "Name": "Hive" }
+        ],
+        "ServiceRole": "EMR_DefaultRole",
+        "JobFlowRole": "EMR_EC2_DefaultRole",
+        "Instances": {
+          "InstanceGroups": [
+            {
+              "Name": "Master",
+              "Market": "ON_DEMAND",
+              "InstanceRole": "MASTER",
+              "InstanceType": "m5.xlarge",
+              "InstanceCount": 1
+            },
+            {
+              "Name": "Worker",
+              "Market": "ON_DEMAND",
+              "InstanceRole": "CORE",
+              "InstanceType": "m5.large",
+              "InstanceCount": 2
+            }
+          ],
+          "Ec2KeyName": "llave2",
+          "KeepJobFlowAliveWhenNoSteps": true,
+          "TerminationProtected": false
+        },
+        "LogUri": "s3://proyecto3-eafit-raw/logs/",
+        "VisibleToAllUsers": true,
+        "BootstrapActions": [
+          {
+            "Name": "Install Python Dependencies",
+            "ScriptBootstrapAction": {
+              "Path": "s3://proyecto3-eafit-scripts/bootstrap.sh"
+            }
+          }
+        ],
+        "Configurations": [
+          {
+            "Classification": "spark-defaults",
+            "Properties": {
+              "spark.sql.adaptive.enabled": "true",
+              "spark.sql.adaptive.coalescePartitions.enabled": "true",
+              "spark.serializer": "org.apache.spark.serializer.KryoSerializer"
+            }
+          }
+        ]
+      },
+      "ResultPath": "$.ClusterInfo",
+      "Next": "WaitForClusterReady",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "NotifyClusterCreationFailure",
+          "ResultPath": "$.clusterError"
+        }
+      ]
+    },
+    "WaitForClusterReady": {
+      "Type": "Wait",
+      "Seconds": 300,
+      "Next": "ETLProcessing"
+    },
+    "NotifyClusterCreationFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:123456789012:weather-pipeline-alerts",
+        "Message": "EMR Cluster creation failed in weather analytics pipeline",
+        "Subject": "Weather Pipeline Alert - Cluster Creation Failure"
+      },
+      "End": true
+    },
+    "ETLProcessing": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::elasticmapreduce:addStep.sync",
+      "Parameters": {
+        "ClusterId.$": "$.ClusterInfo.ClusterId",
+        "Step": {
+          "Name": "ETL-Weather-Data-Processing",
+          "ActionOnFailure": "CONTINUE",
+          "HadoopJarStep": {
+            "Jar": "command-runner.jar",
+            "Args": [
+              "spark-submit",
+              "--deploy-mode", "cluster",
+              "--driver-memory", "2g",
+              "--executor-memory", "2g",
+              "--executor-cores", "2",
+              "--conf", "spark.sql.shuffle.partitions=200",
+              "s3://proyecto3-eafit-scripts/etl_weather_data.py",
+              "--input-bucket", "proyecto3-eafit-raw",
+              "--output-bucket", "proyecto3-eafit-trusted",
+              "--api-data-prefix", "weather_api_data/",
+              "--db-data-prefix", "database_data/"
+            ]
+          }
+        }
+      },
+      "ResultPath": "$.ETLResult",
+      "Next": "AnalyticsProcessing",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "NotifyETLFailure",
+          "ResultPath": "$.etlError"
+        }
+      ]
+    },
+    "NotifyETLFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:123456789012:weather-pipeline-alerts",
+        "Message": "ETL processing failed in weather analytics pipeline",
+        "Subject": "Weather Pipeline Alert - ETL Failure"
+      },
+      "Next": "TerminateCluster"
+    },
+    "AnalyticsProcessing": {
+      "Type": "Parallel",
+      "Comment": "Procesos analíticos en paralelo - Descriptivos y ML",
+      "Branches": [
+        {
+          "StartAt": "DescriptiveAnalytics",
+          "States": {
+            "DescriptiveAnalytics": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::elasticmapreduce:addStep.sync",
+              "Parameters": {
+                "ClusterId.$": "$.ClusterInfo.ClusterId",
+                "Step": {
+                  "Name": "Descriptive-Analytics-SparkSQL",
+                  "ActionOnFailure": "CONTINUE",
+                  "HadoopJarStep": {
+                    "Jar": "command-runner.jar",
+                    "Args": [
+                      "spark-submit",
+                      "--deploy-mode", "cluster",
+                      "--driver-memory", "2g",
+                      "--executor-memory", "2g",
+                      "s3://proyecto3-eafit-scripts/descriptive_analytics.py",
+                      "--input-bucket", "proyecto3-eafit-trusted",
+                      "--output-bucket", "proyecto3-eafit-refined",
+                      "--output-prefix", "descriptive_analytics/",
+                      "--use-spark-sql", "true"
+                    ]
+                  }
+                }
+              },
+              "End": true,
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "Next": "HandleDescriptiveError",
+                  "ResultPath": "$.descriptiveError"
+                }
+              ]
+            },
+            "HandleDescriptiveError": {
+              "Type": "Pass",
+              "Result": "Descriptive analytics failed but continuing",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "MachineLearningAnalytics",
+          "States": {
+            "MachineLearningAnalytics": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::elasticmapreduce:addStep.sync",
+              "Parameters": {
+                "ClusterId.$": "$.ClusterInfo.ClusterId",
+                "Step": {
+                  "Name": "ML-Analytics-SparkML",
+                  "ActionOnFailure": "CONTINUE",
+                  "HadoopJarStep": {
+                    "Jar": "command-runner.jar",
+                    "Args": [
+                      "spark-submit",
+                      "--deploy-mode", "cluster",
+                      "--driver-memory", "3g",
+                      "--executor-memory", "3g",
+                      "--packages", "org.apache.spark:spark-mllib_2.12:3.3.0",
+                      "s3://proyecto3-eafit-scripts/ml_weather_analytics.py",
+                      "--input-bucket", "proyecto3-eafit-trusted",
+                      "--output-bucket", "proyecto3-eafit-refined",
+                      "--output-prefix", "ml_analytics/",
+                      "--models", "temperature_prediction,precipitation_classification,weather_clustering"
+                    ]
+                  }
+                }
+              },
+              "End": true,
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "Next": "HandleMLError",
+                  "ResultPath": "$.mlError"
+                }
+              ]
+            },
+            "HandleMLError": {
+              "Type": "Pass",
+              "Result": "ML analytics failed but continuing",
+              "End": true
+            }
+          }
+        }
+      ],
+      "ResultPath": "$.AnalyticsResults",
+      "Next": "SetupResultsAccess",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "NotifyAnalyticsFailure",
+          "ResultPath": "$.analyticsError"
+        }
+      ]
+    },
+    "NotifyAnalyticsFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:123456789012:weather-pipeline-alerts",
+        "Message": "Analytics processing failed in weather analytics pipeline",
+        "Subject": "Weather Pipeline Alert - Analytics Failure"
+      },
+      "Next": "TerminateCluster"
+    },
+    "SetupResultsAccess": {
+      "Type": "Parallel",
+      "Comment": "Configurar acceso a resultados via Athena y API Gateway",
+      "Branches": [
+        {
+          "StartAt": "CreateAthenaResources",
+          "States": {
+            "CreateAthenaResources": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "setup-athena-tables",
+                "Payload": {
+                  "database_name": "weather_analytics_db",
+                  "refined_bucket": "proyecto3-eafit-refined",
+                  "tables_to_create": [
+                    {
+                      "table_name": "city_temperature_stats",
+                      "location": "s3://proyecto3-eafit-refined/descriptive_analytics/city_temperature_stats/",
+                      "format": "PARQUET"
+                    },
+                    {
+                      "table_name": "monthly_patterns",
+                      "location": "s3://proyecto3-eafit-refined/descriptive_analytics/monthly_patterns/",
+                      "format": "PARQUET"
+                    },
+                    {
+                      "table_name": "extreme_events",
+                      "location": "s3://proyecto3-eafit-refined/descriptive_analytics/extreme_events/",
+                      "format": "PARQUET"
+                    },
+                    {
+                      "table_name": "ml_predictions",
+                      "location": "s3://proyecto3-eafit-refined/ml_analytics/predictions/",
+                      "format": "PARQUET"
+                    }
+                  ]
+                }
+              },
+              "End": true,
+              "Retry": [
+                {
+                  "ErrorEquals": ["States.TaskFailed"],
+                  "IntervalSeconds": 30,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2.0
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "Next": "HandleAthenaError",
+                  "ResultPath": "$.athenaError"
+                }
+              ]
+            },
+            "HandleAthenaError": {
+              "Type": "Pass",
+              "Result": "Athena setup failed but continuing",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "DeployAPIGateway",
+          "States": {
+            "DeployAPIGateway": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "deploy-weather-api",
+                "Payload": {
+                  "api_name": "weather-analytics-api",
+                  "stage_name": "prod",
+                  "lambda_function": "weather-api-query-results",
+                  "endpoints": [
+                    "/weather/cities",
+                    "/weather/monthly",
+                    "/weather/extreme-events",
+                    "/weather/precipitation",
+                    "/weather/ml-predictions",
+                    "/weather/summary",
+                    "/weather/health"
+                  ],
+                  "cors_enabled": true
+                }
+              },
+              "End": true,
+              "Retry": [
+                {
+                  "ErrorEquals": ["States.TaskFailed"],
+                  "IntervalSeconds": 30,
+                  "MaxAttempts": 2,
+                  "BackoffRate": 2.0
+                }
+              ],
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "Next": "HandleAPIError",
+                  "ResultPath": "$.apiError"
+                }
+              ]
+            },
+            "HandleAPIError": {
+              "Type": "Pass",
+              "Result": "API Gateway setup failed but continuing",
+              "End": true
+            }
+          }
+        }
+      ],
+      "ResultPath": "$.AccessSetupResults",
+      "Next": "GenerateExecutionReport"
+    },
+    "GenerateExecutionReport": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "generate-pipeline-report",
+        "Payload": {
+          "execution_id.$": "$$.Execution.Name",
+          "cluster_info.$": "$.ClusterInfo",
+          "etl_result.$": "$.ETLResult",
+          "analytics_results.$": "$.AnalyticsResults",
+          "access_setup_results.$": "$.AccessSetupResults",
+          "report_bucket": "proyecto3-eafit-refined",
+          "report_prefix": "execution_reports/"
+        }
+      },
+      "ResultPath": "$.ExecutionReport",
+      "Next": "NotifySuccess",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "TerminateCluster",
+          "ResultPath": "$.reportError"
+        }
+      ]
+    },
+    "NotifySuccess": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:123456789012:weather-pipeline-success",
+        "Message.$": "$.ExecutionReport.Payload.summary",
+        "Subject": "Weather Analytics Pipeline - Execution Completed Successfully"
+      },
+      "Next": "TerminateCluster"
+    },
+    "TerminateCluster": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::elasticmapreduce:terminateCluster",
+      "Parameters": {
+        "ClusterId.$": "$.ClusterInfo.ClusterId"
+      },
+      "Next": "PipelineCompleted",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "PipelineCompleted",
+          "ResultPath": "$.terminationError"
+        }
+      ]
+    },
+    "PipelineCompleted": {
+      "Type": "Pass",
+      "Result": {
+        "status": "completed",
+        "message": "Weather analytics pipeline execution finished",
+        "timestamp": "2024-06-02T15:30:00Z"
+      },
+      "End": true
+    }
+  }
+}

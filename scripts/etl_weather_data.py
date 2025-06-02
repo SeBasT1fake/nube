@@ -31,7 +31,7 @@ def main():
         # Configuración de base de datos EC2
         # IMPORTANTE: Reemplazar con la IP real de tu EC2
         DB_CONFIG = {
-            'host': '54.123.45.67',  # ⚠️ CAMBIAR POR TU IP EC2
+            'host': '54.221.155.180',  # ⚠️ CAMBIAR POR TU IP EC2
             'port': '3306',
             'database': 'weather_db',
             'user': 'weather_user',

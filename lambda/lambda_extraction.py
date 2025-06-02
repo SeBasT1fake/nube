@@ -127,7 +127,7 @@ def test_connection():
     """
     try:
         DB_CONFIG = {
-            'host': 'tu-ec2-ip-publica',  # Reemplazar con IP real
+            'host': '54.221.155.180',  # Reemplazar con IP real
             'port': 3306,
             'user': 'weather_user',
             'password': 'Weather123!',
