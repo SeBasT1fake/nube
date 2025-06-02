@@ -22,7 +22,7 @@ def lambda_handler(event, context):
         # Configuración de conexión a EC2/MySQL
         # Puedes usar variables de entorno o Parameter Store
         DB_CONFIG = {
-            'host': os.environ.get('DB_HOST', '54.227.114.10'),  # IP de tu EC2
+            'host': os.environ.get('DB_HOST', ''),  # IP de tu EC2
             'port': int(os.environ.get('DB_PORT', '3306')),
             'user': os.environ.get('DB_USER', 'weather_user'),
             'password': os.environ.get('DB_PASSWORD', 'Weather123!'),
