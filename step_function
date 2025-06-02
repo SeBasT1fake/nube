@@ -70,12 +70,8 @@
         "Name": "Weather-Analytics-Cluster",
         "ReleaseLabel": "emr-6.15.0",
         "Applications": [
-          {
-            "Name": "Spark"
-          },
-          {
-            "Name": "Hadoop"
-          }
+          { "Name": "Spark" },
+          { "Name": "Hadoop" }
         ],
         "ServiceRole": "EMR_DefaultRole",
         "JobFlowRole": "EMR_EC2_DefaultRole",
@@ -90,13 +86,13 @@
             },
             {
               "Name": "Worker",
-              "Market": "ON_DEMAND", 
+              "Market": "ON_DEMAND",
               "InstanceRole": "CORE",
               "InstanceType": "m5.large",
               "InstanceCount": 2
             }
           ],
-          "Ec2KeyName": "your-key-pair",
+          "Ec2KeyName": "llave2",
           "KeepJobFlowAliveWhenNoSteps": true,
           "TerminationProtected": false
         },
@@ -176,47 +172,9 @@
               "End": true
             }
           }
-        },
-        {
-          "StartAt": "MLAnalytics",
-          "States": {
-            "MLAnalytics": {
-              "Type": "Task",
-              "Resource": "arn:aws:states:::elasticmapreduce:addStep.sync",
-              "Parameters": {
-                "ClusterId.$": "$.ClusterInfo.ClusterId",
-                "Step": {
-                  "Name": "ML-Analytics",
-                  "ActionOnFailure": "CONTINUE",
-                  "HadoopJarStep": {
-                    "Jar": "command-runner.jar",
-                    "Args": [
-                      "spark-submit",
-                      "--deploy-mode", "cluster",
-                      "s3://proyecto3-eafit-scripts/ml_analytics.py"
-                    ]
-                  }
-                }
-              },
-              "End": true
-            }
-          }
         }
       ],
       "ResultPath": "$.AnalyticsResults",
-      "Next": "SetupAthenaQueries"
-    },
-    "SetupAthenaQueries": {
-      "Type": "Task",
-      "Resource": "arn:aws:states:::lambda:invoke",
-      "Parameters": {
-        "FunctionName": "setup-athena-tables",
-        "Payload": {
-          "refined_bucket": "proyecto3-eafit-refined",
-          "database_name": "weather_analytics"
-        }
-      },
-      "ResultPath": "$.AthenaSetup",
       "Next": "TerminateCluster"
     },
     "TerminateCluster": {
@@ -224,19 +182,6 @@
       "Resource": "arn:aws:states:::elasticmapreduce:terminateCluster",
       "Parameters": {
         "ClusterId.$": "$.ClusterInfo.ClusterId"
-      },
-      "Next": "NotifyCompletion"
-    },
-    "NotifyCompletion": {
-      "Type": "Task",
-      "Resource": "arn:aws:states:::lambda:invoke",
-      "Parameters": {
-        "FunctionName": "pipeline-notification",
-        "Payload": {
-          "status": "completed",
-          "pipeline_execution_arn.$": "$$.Execution.Name",
-          "results.$": "$.AnalyticsResults"
-        }
       },
       "End": true
     }
