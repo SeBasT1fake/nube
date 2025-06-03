@@ -221,8 +221,8 @@ def main():
         logger.info("🚀 Iniciando análisis descriptivo de datos meteorológicos")
         
         # Configuración
-        INPUT_PATH = "s3://proyecto3-eafit-processed"
-        OUTPUT_PATH = "s3://proyecto3-eafit-results"
+        INPUT_PATH = "s3://proyecto3-eafit-trusted"
+        OUTPUT_PATH = "s3://proyecto3-eafit-refined"
         
         # Crear sesión Spark
         spark = create_spark_session()
